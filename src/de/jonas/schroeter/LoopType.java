@@ -18,4 +18,5 @@ public enum LoopType {
     public String getImgSrc() {
         return imgSrc;
     }
+
 }
