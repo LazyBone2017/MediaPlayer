@@ -2,6 +2,9 @@ package de.jonas.schroeter;
 
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
+import com.mpatric.mp3agic.InvalidDataException;
+import com.mpatric.mp3agic.Mp3File;
+import com.mpatric.mp3agic.UnsupportedTagException;
 import javafx.animation.Animation;
 import javafx.animation.KeyFrame;
 import javafx.animation.Timeline;
@@ -9,32 +12,31 @@ import javafx.application.Application;
 import javafx.collections.FXCollections;
 import javafx.collections.MapChangeListener;
 import javafx.collections.ObservableList;
-import javafx.event.Event;
+import javafx.embed.swing.SwingFXUtils;
+import javafx.geometry.Insets;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
-import javafx.scene.control.Menu;
-import javafx.scene.control.MenuBar;
-import javafx.scene.control.MenuItem;
 import javafx.scene.image.Image;
 import javafx.scene.image.ImageView;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.input.MouseButton;
+import javafx.scene.layout.Background;
+import javafx.scene.layout.BackgroundFill;
+import javafx.scene.layout.CornerRadii;
 import javafx.scene.layout.Pane;
 import javafx.scene.media.Media;
 import javafx.scene.media.MediaException;
 import javafx.scene.media.MediaPlayer;
-import javafx.scene.text.Text;
-import javafx.scene.text.TextAlignment;
+import javafx.scene.paint.Paint;
+import javafx.scene.text.*;
 import javafx.stage.FileChooser;
 import javafx.stage.Stage;
 import javafx.util.Duration;
 
-import javax.swing.*;
-import java.awt.*;
+import javax.imageio.ImageIO;
 import java.io.*;
 import java.nio.file.Files;
-import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.*;
 
@@ -44,15 +46,15 @@ import java.util.*;
 public class Main extends Application {
 
     private static Gson gson = new Gson();
-    public static Pane root = new Pane();
-    public static Scene scene = new Scene(root, 1500, 750);
+    private static Pane root = new Pane();
+    private static Scene scene = new Scene(root, 1500, 750);
     private static Media song = new Media("file:/N:/Musik/Greenday-List/Green Day - American Idiot.mp3".replaceAll(" ", "%20"));
     private static MediaPlayer player = new MediaPlayer(song);
     private static String songBefore = "file:/N:/Musik/Greenday-List/Green Day - American Eulogy.mp3".replaceAll(" ", "%20");
     private static boolean isPlaying = false;
     private static boolean isMuted = false;
     private static boolean barDragged = false;
-    private static boolean randomOn = false;
+    private static boolean randomOn = true;
     private static LoopType loop = LoopType.NOLOOP;
     private static Duration oldStop;
     private static ArrayList<String> songs = new ArrayList<>();
@@ -64,22 +66,30 @@ public class Main extends Application {
         launch(args);
     }
 
+    //TODO delete Song isn't working properly - search directories reload the deleted song!
+    //TODO add an "delete search directory" option - deletes the search diretory and the songs
+
     @Override
     public void start(Stage primaryStage){
         primaryStage.setScene(scene);
+        primaryStage.getIcons().add(new Image("de/jonas/schroeter/img/paused.png"));
+        primaryStage.setTitle("Media Player");
         primaryStage.show();
         root.setVisible(true);
+        scene.setFill(Paint.valueOf("black"));
+        //root.setBackground(new Background(new BackgroundFill(Paint.valueOf("#XXAWD"), CornerRadii.EMPTY, Insets.EMPTY)));
         primaryStage.setResizable(false);
-        refresh();
         fillList(false);
-        addControls();
         addBar();
+        addControls();
         addMenu(primaryStage);
         loadConfig();
+        refresh();
         primaryStage.setOnCloseRequest(event -> {
             saveTracks();
             saveConfig();
         });
+
     }
 
     private static void loadConfig(){
@@ -100,14 +110,15 @@ public class Main extends Application {
                 player.setOnReady(() -> {
                     oldStop = player.getTotalDuration().divide(100).multiply(barVal);
                     updateTime(oldStop);
+                    setSongImage(song.getSource().replaceAll("file:/", "").replaceAll("%20", " "));
+                    setSongName();
+                    selectItem();
                 });
                 player.setMute(isMuted);
                 ((ImageView)scene.lookup("#muteButton")).setImage(new Image(isMuted ? "de/jonas/schroeter/img/soundOff.png" : "de/jonas/schroeter/img/soundOn.png"));
                 ((ImageView)scene.lookup("#loopButton")).setImage(new Image(loop.getImgSrc()));
                 ((ImageView)scene.lookup("#randomButton")).setImage(new Image(randomOn ? "de/jonas/schroeter/img/randomOn.png" : "de/jonas/schroeter/img/randomOff.png"));
                 ((Slider)scene.lookup("#volumeSlider")).setValue((double)config[5]);
-
-
             }
             catch(NullPointerException e){
                 e.printStackTrace();
@@ -139,7 +150,7 @@ public class Main extends Application {
         Gson gson = new Gson();
         String json = gson.toJson(songs);
         File file = new File("songs.json");
-        BufferedWriter writer = null;
+        BufferedWriter writer;
         try{
             writer = new BufferedWriter(new FileWriter(file));
             writer.write(json);
@@ -172,7 +183,7 @@ public class Main extends Application {
             if(!isRefresh)searchDirectories = (ArrayList)config[7];
         }
         catch(FileNotFoundException e){
-            e.printStackTrace();
+           System.out.println("Config File is going to be created.");
         }
         for(String dirPath : searchDirectories){
             File dir = new File(dirPath);
@@ -227,6 +238,39 @@ public class Main extends Application {
         time.setLayoutX(scene.lookup("#randomButton").getLayoutX() - 15 - time.getLayoutBounds().getWidth());
     }
 
+    private static void setSongImage(String finalSrc){
+        try{
+            Mp3File file = new Mp3File(new File(finalSrc));
+            if(file.hasId3v2Tag()){
+                byte[] imgData = file.getId3v2Tag().getAlbumImage();
+                ImageView songImage = (ImageView) scene.lookup("#songImage");
+                try{
+                    Image img = SwingFXUtils.toFXImage(ImageIO.read(new ByteArrayInputStream(imgData)), null);
+                    songImage.setImage(img);
+                }
+                catch(NullPointerException e){
+                    songImage.setImage(new Image("de/jonas/schroeter/img/unknown.png"));
+                }
+            }
+        }
+        catch(IOException | InvalidDataException | UnsupportedTagException e){
+            e.printStackTrace();
+        }
+    }
+
+    private static void setSongName(){
+        Text text = (Text)scene.lookup("#songName");
+        String artist = String.valueOf(song.getMetadata().get("artist"));
+        text.setText(artist + "\n" + String.valueOf(song.getMetadata().get("title")));
+        text.setLayoutX((scene.getWidth() - text.getLayoutBounds().getWidth()) / 2);
+    }
+
+    private static void selectItem(){
+        ListView<String> view = (ListView<String>)scene.lookup("#songView");
+        view.scrollTo(srcToName.get(song.getSource()));
+        view.getSelectionModel().select(srcToName.get(song.getSource()));
+    }
+
     private static void playSong(double volume, boolean isMute, String src){
         if(song != null){
             if(!songBefore.equals(song.getSource()))songBefore = song.getSource();
@@ -244,11 +288,10 @@ public class Main extends Application {
         }
         player = new MediaPlayer(song);
         isMuted = isMute;
+        String finalSrc = src.replaceAll("file:/", "").replaceAll("%20", " ");
         song.getMetadata().addListener((MapChangeListener<? super String, ? super Object>) change -> {
-            Text text = (Text)scene.lookup("#songName");
-            String artist = String.valueOf(song.getMetadata().get("artist"));
-            text.setText(artist + " - " + String.valueOf(song.getMetadata().get("title")));
-            text.setLayoutX((scene.getWidth() - text.getLayoutBounds().getWidth()) / 2);
+            setSongImage(finalSrc);
+            setSongName();
         });
         player.setOnEndOfMedia(() -> {
             switch(loop){
@@ -282,8 +325,7 @@ public class Main extends Application {
         });
 
 
-        ListView<String> view = (ListView<String>)scene.lookup("#songView");
-        view.getSelectionModel().select(srcToName.get(song.getSource()));
+        selectItem();
         ImageView middleButton = (ImageView)scene.lookup("#middleButton");
         middleButton.setImage(new Image("de/jonas/schroeter/img/playing.png"));
     }
@@ -334,6 +376,16 @@ public class Main extends Application {
             if(event.getCode() == KeyCode.SPACE){
                 doOnMiddleClick(middle);
             }
+            else if(event.getCode() == KeyCode.M){
+                if(isMuted){
+                    player.setMute(false);
+                }
+                else {
+                    player.setMute(true);
+                }
+                isMuted = !isMuted;
+                ((ImageView)scene.lookup("#muteButton")).setImage(new Image(isMuted ? "de/jonas/schroeter/img/soundOff.png" : "de/jonas/schroeter/img/soundOn.png"));
+            }
         });
         middle.setOnMouseClicked(event -> {
             doOnMiddleClick(middle);
@@ -349,10 +401,8 @@ public class Main extends Application {
                     player.stop();
                     if(player.getCurrentTime().toSeconds() < 6){
                         playSong(player.getVolume(), isMuted, songBefore);
-                        System.out.println("smaller");
                     }
                     else{
-                        System.out.println("Isnt playing");
                         playSong(player.getVolume(), isMuted, song.getSource());
                     }
                 }
@@ -367,10 +417,8 @@ public class Main extends Application {
                         int index = songs.indexOf(song.getSource()) - 1;
                         if(index < 0)index = songs.size() - 1;
                         playSong(player.getVolume(), isMuted, songs.get(index));
-                        System.out.println("smaller");
                     }
                     else{
-                        System.out.println("Isnt playing");
                         playSong(player.getVolume(), isMuted, song.getSource());
                     }
                 }
@@ -392,6 +440,7 @@ public class Main extends Application {
             boolean isMute = player.isMute();
             oldStop = Duration.valueOf("0.0ms");
             playSong(volume, isMute, checkForNextSong(src));
+            //TODO fix bug: when stopped and this button is being pressed, it should not play the next one
         });
         ImageView muteButton = new ImageView();
         muteButton.setId("muteButton");
@@ -441,26 +490,41 @@ public class Main extends Application {
         slider.setPrefSize(100, 10);
         slider.setLayoutX(muteButton.getImage().getWidth() + muteButton.getLayoutX() + 15);
         slider.setLayoutY(muteButton.getLayoutY() + muteButton.getImage().getHeight() / 2 - slider.getPrefHeight() / 2);
-        slider.setOnMouseDragged(event -> {
-            player.setVolume(slider.getValue() / 100);
-        });
-        slider.setOnMouseClicked(event -> {
-            player.setVolume(slider.getValue() / 100);
-        });
+        slider.setOnMouseDragged(event -> player.setVolume(slider.getValue() / 100));
+        slider.setOnMouseClicked(event -> player.setVolume(slider.getValue() / 100));
         slider.setId("volumeSlider");
+        slider.setStyle("-fx-faint-focus-color: transparent; -fx-focus-color: grey");
 
         Text text = new Text();
         text.setId("songName");
         text.setTextAlignment(TextAlignment.CENTER);
+        text.setFont(Font.font("Times New Roman", FontWeight.BOLD, FontPosture.ITALIC, 30));
         text.setLayoutY(100);
 
         Text time = new Text();
         time.setId("textTime");
         time.setText("00:00 / 00:00");
+        time.setFill(Paint.valueOf("white"));
         time.setTextAlignment(TextAlignment.CENTER);
         time.setLayoutY(left.getLayoutY() + left.getImage().getHeight() - time.getLayoutBounds().getHeight() / 2);
 
-        root.getChildren().addAll(left, middle, right, muteButton, loopButton, randomButton, slider, text, time);
+        ImageView songImage = new ImageView();
+        songImage.setLayoutX(400);
+        songImage.setId("songImage");
+        int radius = 400;
+        songImage.setFitHeight(radius);
+        songImage.setFitWidth(radius);
+        songImage.setLayoutX((scene.getWidth() - radius) / 2);
+        songImage.setLayoutY(text.getLayoutY() + 60);
+
+        ImageView underBar = new ImageView();
+        underBar.setImage(new Image("de/jonas/schroeter/img/underBar.png"));
+        underBar.setFitWidth(scene.getWidth());
+        underBar.setFitHeight(scene.getHeight() - scene.lookup("#bar").getLayoutY() + 10);
+        underBar.setLayoutY(scene.lookup("#bar").getLayoutY() - 10);
+
+        root.getChildren().addAll(left, middle, right, muteButton, loopButton, randomButton, slider, text, time, songImage, underBar);
+        underBar.toBack();
     }
 
     private static void addBar(){
@@ -469,16 +533,12 @@ public class Main extends Application {
         bar.setLayoutX((scene.getWidth() - bar.getPrefWidth()) / 2);
         bar.setLayoutY(scene.getHeight() - 100);
         bar.setId("bar");
+        bar.setStyle("-fx-faint-focus-color: transparent; -fx-focus-color: grey");
         root.getChildren().add(bar);
         // SP * (FT / 100) = CT
-        bar.setOnDragDetected(event -> {
-            barDragged = true;
-        });
+        bar.setOnDragDetected(event -> barDragged = true);
 
-        bar.setOnMouseDragged(event -> {
-            updateTime(player.getTotalDuration().divide(100).multiply(bar.getValue()));
-            System.out.println("Dragged!");
-        });
+        bar.setOnMouseDragged(event -> updateTime(player.getTotalDuration().divide(100).multiply(bar.getValue())));
         bar.setOnMouseReleased(event -> {
             if(player != null){
                 oldStop = player.getTotalDuration().divide(100).multiply(bar.getValue());
@@ -486,7 +546,6 @@ public class Main extends Application {
                 updateTime(player.getTotalDuration().divide(100).multiply(bar.getValue()));
             }
             barDragged = false;
-            System.out.println("Release");
         });
 
     }
@@ -498,10 +557,7 @@ public class Main extends Application {
         }
         ListView<String> view = ((ListView<String>)scene.lookup("#songView"));
         view.getItems().clear();
-        System.out.println(view.getItems().size());
-        System.out.println(names.contains("Kalimba"));
         view.getItems().addAll(names);
-        System.out.println(view.getItems().size());
     }
 
     private static void addListView(){
@@ -512,11 +568,10 @@ public class Main extends Application {
         ListView<String> view = new ListView<>(names);
         view.setCellFactory(param -> {
             ListCell<String> cell = new ListCell<>();
+            cell.setId("cell");
             cell.textProperty().bind(cell.itemProperty());
             ContextMenu contextMenu = new ContextMenu();
-            contextMenu.setOnAutoHide(event -> {
-                view.getSelectionModel().select(srcToName.get(song.getSource()));
-            });
+            contextMenu.setOnAutoHide(event -> selectItem());
 
             MenuItem delete = new MenuItem("Delete");
             delete.setOnAction(event -> {
@@ -544,12 +599,9 @@ public class Main extends Application {
                 }
                 else playSong(((Slider) scene.lookup("#volumeSlider")).getValue(), false, nameToSrc.get(view.getSelectionModel().getSelectedItem()));
             }
-            else if(event.getButton().equals(MouseButton.SECONDARY)){
-
-            }
             else if(event.getButton().equals(MouseButton.PRIMARY)){
                 if(song == null)view.getSelectionModel().clearSelection();
-                else view.getSelectionModel().select(srcToName.get(song.getSource()));
+                else selectItem();
             }
         });
         root.getChildren().add(view);
@@ -557,21 +609,30 @@ public class Main extends Application {
 
     private static void addMenu(Stage primaryStage){
         MenuBar menuBar = new MenuBar();
+        menuBar.setStyle("-fx-border-color: black");
         Menu files = new Menu("Files");
         MenuItem search = new MenuItem("Add Search Directory");
         search.setOnAction(event -> {
-            String s = JOptionPane.showInputDialog("Please enter the directory path:");
-            if(s == null)return;
-            s = s.replace("\\", "/");
-            if(Files.exists(Paths.get(s))) searchDirectories.add(s);
-                else JOptionPane.showMessageDialog(null, "The directory \"" + s + "\" does not exist.");
-                System.out.println("Implement that shitty stuff!");
-                fillList(true);
+
+            TextInputDialog dialog = new TextInputDialog();
+            dialog.setTitle("Search");
+            dialog.setHeaderText("Please enter the directory path:");
+            String s = String.valueOf(dialog.showAndWait());
+            s = s.replace("Optional[", "").replace("]", "").replace("\\", "/");
+            if(s.equals("Optional.empty"))return;
+            System.out.println(s.equals(""));
+            if(!s.equals("") && Files.exists(Paths.get(s))) searchDirectories.add(s);
+                else {
+                    System.out.println("Error");
+                    Alert alert = new Alert(Alert.AlertType.WARNING);
+                    alert.setTitle("Warning");
+                    alert.setHeaderText("The directory \"" + s + "\" does not exist.");
+                    alert.show();
+            }
+            fillList(true);
         });
         MenuItem file = new MenuItem("Add File");
-        file.setOnAction(event -> {
-            setupFileChooser(primaryStage);
-        });
+        file.setOnAction(event -> setupFileChooser(primaryStage));
 
         files.getItems().addAll(search, file);
         menuBar.getMenus().add(files);
