@@ -3,8 +3,8 @@
     <output-path>$PROJECT_DIR$/out/artifacts/MediaPlayer_jar</output-path>
     <root id="archive" name="MediaPlayer.jar">
       <element id="module-output" name="MediaPlayer" />
-      <element id="extracted-dir" path="$PROJECT_DIR$/lib/gson-2.8.2.jar" path-in-jar="/" />
       <element id="extracted-dir" path="$PROJECT_DIR$/lib/mp3agic-0.9.1.jar" path-in-jar="/" />
+      <element id="extracted-dir" path="$PROJECT_DIR$/lib/gson-2.8.2.jar" path-in-jar="/" />
     </root>
   </artifact>
 </component>

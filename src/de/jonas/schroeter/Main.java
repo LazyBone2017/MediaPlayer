@@ -9,11 +9,13 @@ import javafx.animation.Animation;
 import javafx.animation.KeyFrame;
 import javafx.animation.Timeline;
 import javafx.application.Application;
+import javafx.beans.value.ChangeListener;
+import javafx.beans.value.ObservableValue;
 import javafx.collections.FXCollections;
 import javafx.collections.MapChangeListener;
 import javafx.collections.ObservableList;
 import javafx.embed.swing.SwingFXUtils;
-import javafx.geometry.Insets;
+import javafx.event.EventType;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.image.Image;
@@ -21,9 +23,6 @@ import javafx.scene.image.ImageView;
 import javafx.scene.input.KeyCode;
 import javafx.scene.input.KeyEvent;
 import javafx.scene.input.MouseButton;
-import javafx.scene.layout.Background;
-import javafx.scene.layout.BackgroundFill;
-import javafx.scene.layout.CornerRadii;
 import javafx.scene.layout.Pane;
 import javafx.scene.media.Media;
 import javafx.scene.media.MediaException;
@@ -36,8 +35,10 @@ import javafx.util.Duration;
 
 import javax.imageio.ImageIO;
 import java.io.*;
+import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.security.Key;
 import java.util.*;
 
 /**
@@ -48,8 +49,8 @@ public class Main extends Application {
     private static Gson gson = new Gson();
     private static Pane root = new Pane();
     private static Scene scene = new Scene(root, 1500, 750);
-    private static Media song = new Media("file:/N:/Musik/Greenday-List/Green Day - American Idiot.mp3".replaceAll(" ", "%20"));
-    private static MediaPlayer player = new MediaPlayer(song);
+    private static Media song;// = new Media("file:/N:/Musik/dxc.mp3".replaceAll(" ", "%20"));
+    private static MediaPlayer player;// = new MediaPlayer(song);
     private static String songBefore = "file:/N:/Musik/Greenday-List/Green Day - American Eulogy.mp3".replaceAll(" ", "%20");
     private static boolean isPlaying = false;
     private static boolean isMuted = false;
@@ -61,13 +62,13 @@ public class Main extends Application {
     private static HashMap<String, String> srcToName = new HashMap<>();
     private static HashMap<String, String> nameToSrc = new HashMap<>();
     private static ArrayList<String> searchDirectories = new ArrayList<>();
+    private static ArrayList<String> excludedSongs = new ArrayList<>();
 
     public static void main(String... args){
         launch(args);
     }
 
-    //TODO delete Song isn't working properly - search directories reload the deleted song!
-    //TODO add an "delete search directory" option - deletes the search diretory and the songs
+    //TODO add an "delete search directory" option - deletes the search directory and the songs
 
     @Override
     public void start(Stage primaryStage){
@@ -77,19 +78,52 @@ public class Main extends Application {
         primaryStage.show();
         root.setVisible(true);
         scene.setFill(Paint.valueOf("black"));
-        //root.setBackground(new Background(new BackgroundFill(Paint.valueOf("#XXAWD"), CornerRadii.EMPTY, Insets.EMPTY)));
         primaryStage.setResizable(false);
-        fillList(false);
-        addBar();
-        addControls();
-        addMenu(primaryStage);
-        loadConfig();
-        refresh();
+        if(song == null){
+            findMp3(primaryStage);
+        }
+        else{
+            fillList(false);
+            addBar();
+            addControls();
+            addMenu(primaryStage);
+            loadConfig();
+            refresh();
+        }
+        root.getStyleClass().add("de/jonas/schroeter/style/style.css");
         primaryStage.setOnCloseRequest(event -> {
             saveTracks();
             saveConfig();
         });
 
+    }
+
+    private static void findMp3(Stage primaryStage){
+        try{
+            File file = new File(Main.class.getProtectionDomain().getCodeSource().getLocation().toURI().getPath()).getParentFile();
+            System.out.println(file.toPath().toString());
+            for(File f : Objects.requireNonNull(file.listFiles())){
+                if(f.getPath().contains(".mp3")){
+                    song =  new Media("file:///" + f.toURI().getPath().replace(" ", "%20"));
+                    player = new MediaPlayer(song);
+                    fillList(false);
+                    addBar();
+                    addControls();
+                    addMenu(primaryStage);
+                    loadConfig();
+                    refresh();
+                    return;
+                }
+            }
+            System.out.println("No mp3s");
+            Alert alert = new Alert(Alert.AlertType.WARNING);
+            alert.setContentText("Please place a Mp3 File into the jar\'s directory.");
+            alert.show();
+            alert.setOnCloseRequest(event -> System.exit(0));
+        }
+        catch(URISyntaxException e){
+            System.out.println(e.getMessage());
+        }
     }
 
     private static void loadConfig(){
@@ -111,7 +145,7 @@ public class Main extends Application {
                     oldStop = player.getTotalDuration().divide(100).multiply(barVal);
                     updateTime(oldStop);
                     setSongImage(song.getSource().replaceAll("file:/", "").replaceAll("%20", " "));
-                    setSongName();
+                    setSongInfo();
                     selectItem();
                 });
                 player.setMute(isMuted);
@@ -169,7 +203,7 @@ public class Main extends Application {
             TypeToken<ArrayList<String>> typeToken = new TypeToken<ArrayList<String>>() {};
             //songs.addAll(gson.fromJson(scanner.nextLine(), typeToken.getType()));
             for(String s : (ArrayList<String>)gson.fromJson(scanner.nextLine(), typeToken.getType())){
-                if(!songs.contains(s))songs.add(s);
+                if(!songs.contains(s) && !excludedSongs.contains(s))songs.add(s);
             }
         }
         catch(IOException e){
@@ -188,7 +222,7 @@ public class Main extends Application {
         for(String dirPath : searchDirectories){
             File dir = new File(dirPath);
             for(File f : Objects.requireNonNull(dir.listFiles())){
-                if(f.getName().contains(".mp3") && !songs.contains("file:/" + f.getAbsolutePath().replace(" ", "%20").replace("\\", "/")))
+                if(f.getName().contains(".mp3") && !songs.contains("file:/" + f.getAbsolutePath().replace(" ", "%20").replace("\\", "/")) && !excludedSongs.contains("file:/" + f.getAbsolutePath().replace(" ", "%20").replace("\\", "/")))
                     songs.add("file:/" + f.getAbsolutePath().replace(" ", "%20").replace("\\", "/"));
             }
             for(String s : songs){
@@ -258,16 +292,22 @@ public class Main extends Application {
         }
     }
 
-    private static void setSongName(){
-        Text text = (Text)scene.lookup("#songName");
-        String artist = String.valueOf(song.getMetadata().get("artist"));
-        text.setText(artist + "\n" + String.valueOf(song.getMetadata().get("title")));
-        text.setLayoutX((scene.getWidth() - text.getLayoutBounds().getWidth()) / 2);
+    private static void setSongInfo(){
+        Text songName = (Text)scene.lookup("#songName");
+        songName.setText(String.valueOf(song.getMetadata().get("title")));
+        songName.setLayoutX((scene.getWidth() - songName.getLayoutBounds().getWidth()) / 2);
+
+        String artistString = String.valueOf(song.getMetadata().get("artist"));
+        Text artist = (Text)scene.lookup("#artistName");
+        artist.setText(artistString);
+        artist.setLayoutX((scene.getWidth() - artist.getLayoutBounds().getWidth()) / 2);
+        artist.setVisible(true);
     }
 
     private static void selectItem(){
         ListView<String> view = (ListView<String>)scene.lookup("#songView");
-        view.scrollTo(srcToName.get(song.getSource()));
+        //TODO prevent from scrolling when double clicked
+        //view.scrollTo(srcToName.get(song.getSource()));
         view.getSelectionModel().select(srcToName.get(song.getSource()));
     }
 
@@ -291,7 +331,7 @@ public class Main extends Application {
         String finalSrc = src.replaceAll("file:/", "").replaceAll("%20", " ");
         song.getMetadata().addListener((MapChangeListener<? super String, ? super Object>) change -> {
             setSongImage(finalSrc);
-            setSongName();
+            setSongInfo();
         });
         player.setOnEndOfMedia(() -> {
             switch(loop){
@@ -373,7 +413,7 @@ public class Main extends Application {
         middle.setLayoutX((scene.getWidth() - middle.getImage().getWidth()) / 2);
         middle.setLayoutY(scene.getHeight() - 80);
         root.addEventFilter(KeyEvent.KEY_PRESSED, event -> {
-            if(event.getCode() == KeyCode.SPACE){
+            if(event.getCode() == KeyCode.SPACE && !scene.lookup("#searchField").isFocused()){
                 doOnMiddleClick(middle);
             }
             else if(event.getCode() == KeyCode.M){
@@ -396,10 +436,12 @@ public class Main extends Application {
         left.setLayoutX(middle.getLayoutX() - left.getImage().getWidth() - 15);
         left.setLayoutY(middle.getLayoutY() + middle.getImage().getHeight() / 2 - left.getImage().getHeight() / 2);
         left.setOnMouseClicked(event -> {
-            if(randomOn){
+            oldStop = Duration.valueOf("0.0ms");
+            if(false){ //Random?
                 if(isPlaying){
-                    player.stop();
+                    player.pause();
                     if(player.getCurrentTime().toSeconds() < 6){
+                        System.out.println(songBefore);
                         playSong(player.getVolume(), isMuted, songBefore);
                     }
                     else{
@@ -407,12 +449,12 @@ public class Main extends Application {
                     }
                 }
                 else{
-                    playSong(player.getVolume(), isMuted, song.getSource());
+                    playSong(player.getVolume(), isMuted, songBefore);
                 }
             }
             else {
                 if(isPlaying){
-                    player.stop();
+                    player.pause();
                     if(player.getCurrentTime().toSeconds() < 6){
                         int index = songs.indexOf(song.getSource()) - 1;
                         if(index < 0)index = songs.size() - 1;
@@ -495,11 +537,17 @@ public class Main extends Application {
         slider.setId("volumeSlider");
         slider.setStyle("-fx-faint-focus-color: transparent; -fx-focus-color: grey");
 
-        Text text = new Text();
-        text.setId("songName");
-        text.setTextAlignment(TextAlignment.CENTER);
-        text.setFont(Font.font("Times New Roman", FontWeight.BOLD, FontPosture.ITALIC, 30));
-        text.setLayoutY(100);
+        Text songName = new Text();
+        songName.setId("songName");
+        songName.setTextAlignment(TextAlignment.CENTER);
+        songName.setFont(Font.font("Times New Roman", FontWeight.BOLD, FontPosture.ITALIC, 30));
+        songName.setLayoutY(100);
+
+        Text artist = new Text();
+        artist.setId("artistName");
+        artist.setTextAlignment(TextAlignment.CENTER);
+        artist.setFont(Font.font("Times New Roman", FontWeight.BLACK, FontPosture.ITALIC, 23));
+        artist.setLayoutY(140);
 
         Text time = new Text();
         time.setId("textTime");
@@ -515,7 +563,15 @@ public class Main extends Application {
         songImage.setFitHeight(radius);
         songImage.setFitWidth(radius);
         songImage.setLayoutX((scene.getWidth() - radius) / 2);
-        songImage.setLayoutY(text.getLayoutY() + 60);
+        songImage.setLayoutY(songName.getLayoutY() + 60);
+        songImage.setStyle("-fx-border-width: 10; -fx-border-color: red");
+
+        ProgressBar progressBar = new ProgressBar();
+        Slider bar = (Slider)scene.lookup("#bar");
+        progressBar.setLayoutX(bar.getLayoutX());
+        progressBar.setLayoutY(bar.getLayoutY());
+        progressBar.setVisible(true);
+        progressBar.setProgress(100);
 
         ImageView underBar = new ImageView();
         underBar.setImage(new Image("de/jonas/schroeter/img/underBar.png"));
@@ -523,7 +579,44 @@ public class Main extends Application {
         underBar.setFitHeight(scene.getHeight() - scene.lookup("#bar").getLayoutY() + 10);
         underBar.setLayoutY(scene.lookup("#bar").getLayoutY() - 10);
 
-        root.getChildren().addAll(left, middle, right, muteButton, loopButton, randomButton, slider, text, time, songImage, underBar);
+        TextField searchField = new TextField();
+        searchField.setId("searchField");
+        ListView<String> view = (ListView<String>)scene.lookup("#songView");
+        searchField.setPrefWidth(200);
+        searchField.setPrefHeight(25);
+        searchField.setLayoutX(2);
+        searchField.setPromptText("Search");
+        searchField.setLayoutY(view.getLayoutY() - searchField.getPrefHeight() - 10);
+        searchField.textProperty().addListener((observable, oldValue, newValue) -> {
+            if(searchField.getText().equals("")){
+                selectItem();
+                return;
+            }
+            for(String s : view.getItems()){
+                if(s.contains(searchField.getText())){
+                    System.out.println(searchField.getText());
+                    System.out.println(s);
+                    view.getSelectionModel().select(s);
+                    view.scrollTo(s);
+                    break;
+                }
+            }
+        });
+        searchField.addEventFilter(KeyEvent.KEY_PRESSED, event -> {
+            if(event.getCode() == KeyCode.ENTER){
+                oldStop = Duration.valueOf("0.0ms");
+                if(player != null){
+                    player.stop();
+                    playSong(player.getVolume(), player.isMute(), nameToSrc.get(view.getSelectionModel().getSelectedItem()));
+                }
+                else playSong(((Slider) scene.lookup("#volumeSlider")).getValue(), false, nameToSrc.get(view.getSelectionModel().getSelectedItem()));
+            }
+            else if(event.getCode() == KeyCode.TAB){
+                selectItem();
+            }
+        });
+
+        root.getChildren().addAll(left, middle, right, muteButton, loopButton, randomButton, slider, songName, artist, time, songImage, underBar, searchField);
         underBar.toBack();
     }
 
@@ -576,6 +669,7 @@ public class Main extends Application {
             MenuItem delete = new MenuItem("Delete");
             delete.setOnAction(event -> {
                 songs.remove(nameToSrc.get(cell.getItem()));
+                excludedSongs.add(nameToSrc.get(cell.getItem()));
                 fillList(true);
             });
 
@@ -599,7 +693,7 @@ public class Main extends Application {
                 }
                 else playSong(((Slider) scene.lookup("#volumeSlider")).getValue(), false, nameToSrc.get(view.getSelectionModel().getSelectedItem()));
             }
-            else if(event.getButton().equals(MouseButton.PRIMARY)){
+            else if(event.getButton().equals(MouseButton.PRIMARY) && event.getClickCount() == 1){
                 if(song == null)view.getSelectionModel().clearSelection();
                 else selectItem();
             }
@@ -623,16 +717,35 @@ public class Main extends Application {
             System.out.println(s.equals(""));
             if(!s.equals("") && Files.exists(Paths.get(s))) searchDirectories.add(s);
                 else {
-                    System.out.println("Error");
-                    Alert alert = new Alert(Alert.AlertType.WARNING);
-                    alert.setTitle("Warning");
-                    alert.setHeaderText("The directory \"" + s + "\" does not exist.");
-                    alert.show();
+                    createDirNotExist(s);
             }
             fillList(true);
         });
         MenuItem file = new MenuItem("Add File");
         file.setOnAction(event -> setupFileChooser(primaryStage));
+
+        MenuItem deleteDir = new MenuItem("Remove Search Directory");
+        deleteDir.setOnAction(event -> {
+            TextInputDialog dialog = new TextInputDialog();
+            dialog.setTitle("Remove");
+            dialog.setHeaderText("Please enter the directory path:");
+            String s = String.valueOf(dialog.showAndWait());
+            s = s.replace("Optional[", "").replace("]", "").replace("\\", "/");
+            if(s.equals("Optional.empty"))return;
+            System.out.println(s.equals(""));
+            if(!s.equals("") && Files.exists(Paths.get(s))){
+                System.out.println("Remove!");
+                /*File dir = new File(s);
+                for(File f : Objects.requireNonNull(dir.listFiles())){
+                    songs.remove(f.toPath().toString());
+                }
+                searchDirectories.remove(s);*/
+            }
+            else {
+                createDirNotExist(s);
+            }
+            fillList(true);
+        });
 
         files.getItems().addAll(search, file);
         menuBar.getMenus().add(files);
@@ -646,8 +759,17 @@ public class Main extends Application {
         chooser.getExtensionFilters().addAll(new FileChooser.ExtensionFilter("MP3 Audio File", "*.mp3"));
 
         File file = chooser.showOpenDialog(primaryStage);
-        if(file == null)return;
+        if(file == null){return;}
         songs.add("file:/" + file.toPath().toAbsolutePath().toString().replace("\\", "/").replace(" ", "%20"));
+        excludedSongs.remove("file:/" + file.toPath().toAbsolutePath().toString().replace("\\", "/").replace(" ", "%20"));
         fillList(true);
+    }
+
+    private static void createDirNotExist(String s){
+        System.out.println("Error");
+        Alert alert = new Alert(Alert.AlertType.WARNING);
+        alert.setTitle("Warning");
+        alert.setHeaderText("The directory \"" + s + "\" does not exist.");
+        alert.show();
     }
 }
