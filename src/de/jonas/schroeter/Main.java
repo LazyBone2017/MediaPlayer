@@ -9,13 +9,10 @@ import javafx.animation.Animation;
 import javafx.animation.KeyFrame;
 import javafx.animation.Timeline;
 import javafx.application.Application;
-import javafx.beans.value.ChangeListener;
-import javafx.beans.value.ObservableValue;
 import javafx.collections.FXCollections;
 import javafx.collections.MapChangeListener;
 import javafx.collections.ObservableList;
 import javafx.embed.swing.SwingFXUtils;
-import javafx.event.EventType;
 import javafx.scene.Scene;
 import javafx.scene.control.*;
 import javafx.scene.image.Image;
@@ -38,7 +35,6 @@ import java.io.*;
 import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.security.Key;
 import java.util.*;
 
 /**
@@ -49,8 +45,8 @@ public class Main extends Application {
     private static Gson gson = new Gson();
     private static Pane root = new Pane();
     private static Scene scene = new Scene(root, 1500, 750);
-    private static Media song;// = new Media("file:/N:/Musik/dxc.mp3".replaceAll(" ", "%20"));
-    private static MediaPlayer player;// = new MediaPlayer(song);
+    private static Media song;
+    private static MediaPlayer player;
     private static String songBefore = "file:/N:/Musik/Greenday-List/Green Day - American Eulogy.mp3".replaceAll(" ", "%20");
     private static boolean isPlaying = false;
     private static boolean isMuted = false;
@@ -58,6 +54,7 @@ public class Main extends Application {
     private static boolean randomOn = true;
     private static LoopType loop = LoopType.NOLOOP;
     private static Duration oldStop;
+    private static double rate = 1;
     private static ArrayList<String> songs = new ArrayList<>();
     private static HashMap<String, String> srcToName = new HashMap<>();
     private static HashMap<String, String> nameToSrc = new HashMap<>();
@@ -69,6 +66,8 @@ public class Main extends Application {
     }
 
     //TODO add an "delete search directory" option - deletes the search directory and the songs
+    //TODO delete - excludedSongs has to be saved as file!
+    //TODO create readme.txt
 
     @Override
     public void start(Stage primaryStage){
@@ -101,7 +100,6 @@ public class Main extends Application {
     private static void findMp3(Stage primaryStage){
         try{
             File file = new File(Main.class.getProtectionDomain().getCodeSource().getLocation().toURI().getPath()).getParentFile();
-            System.out.println(file.toPath().toString());
             for(File f : Objects.requireNonNull(file.listFiles())){
                 if(f.getPath().contains(".mp3")){
                     song =  new Media("file:///" + f.toURI().getPath().replace(" ", "%20"));
@@ -141,8 +139,10 @@ public class Main extends Application {
                 player = new MediaPlayer(song);
                 double barVal = (double)config[6];
                 ((Slider)scene.lookup("#bar")).setValue(barVal);
+                if(config.length > 8)rate = (double)config[8];
                 player.setOnReady(() -> {
                     oldStop = player.getTotalDuration().divide(100).multiply(barVal);
+                    player.setVolume((double)config[5] / 100);
                     updateTime(oldStop);
                     setSongImage(song.getSource().replaceAll("file:/", "").replaceAll("%20", " "));
                     setSongInfo();
@@ -167,7 +167,7 @@ public class Main extends Application {
     }
 
     private static void saveConfig(){
-        Object[] config = {song.getSource(), songBefore, isMuted, randomOn, loop, ((Slider)scene.lookup("#volumeSlider")).getValue(), ((Slider)scene.lookup("#bar")).getValue(), searchDirectories.toArray()};
+        Object[] config = {song.getSource(), songBefore, isMuted, randomOn, loop, ((Slider)scene.lookup("#volumeSlider")).getValue(), ((Slider)scene.lookup("#bar")).getValue(), searchDirectories.toArray(), rate};
         String JSON = gson.toJson(config);
         File jsonFile = new File("config.json");
         try{
@@ -243,6 +243,8 @@ public class Main extends Application {
             }
             Text text = (Text) scene.lookup("#songName");
             text.setText(text.getText().replaceAll("null", "Unknown"));
+            text = (Text) scene.lookup("#artistName");
+            text.setText(text.getText().replaceAll("null", "Unknown Artist"));
             text.setLayoutX((scene.getWidth() - text.getLayoutBounds().getWidth()) / 2);
             if(isPlaying && !barDragged)updateTime(null);
         }));
@@ -307,11 +309,11 @@ public class Main extends Application {
     private static void selectItem(){
         ListView<String> view = (ListView<String>)scene.lookup("#songView");
         //TODO prevent from scrolling when double clicked
-        //view.scrollTo(srcToName.get(song.getSource()));
+        view.scrollTo(srcToName.get(song.getSource()));
         view.getSelectionModel().select(srcToName.get(song.getSource()));
     }
 
-    private static void playSong(double volume, boolean isMute, String src){
+    private static void playSong(double volume, boolean isMute, String src, boolean... wasStopped){
         if(song != null){
             if(!songBefore.equals(song.getSource()))songBefore = song.getSource();
         }
@@ -359,15 +361,19 @@ public class Main extends Application {
         player.setOnReady(() ->{
             player.setVolume(volume);
             player.setMute(isMute);
-            player.play();
-            player.seek(oldStop);
-            isPlaying = true;
+            if(wasStopped.length > 1)throw new IllegalArgumentException("wasStopped should not contain more than one value");
+            if(wasStopped.length == 0){
+                player.play();
+                player.setRate(rate); //--> speed Mult
+                player.seek(oldStop);
+                isPlaying = true;
+            }
         });
-
-
         selectItem();
-        ImageView middleButton = (ImageView)scene.lookup("#middleButton");
-        middleButton.setImage(new Image("de/jonas/schroeter/img/playing.png"));
+        if(wasStopped.length == 0){
+            ImageView middleButton = (ImageView) scene.lookup("#middleButton");
+            middleButton.setImage(new Image("de/jonas/schroeter/img/playing.png"));
+        }
     }
 
     private static String checkForNextSong(String song){
@@ -405,6 +411,58 @@ public class Main extends Application {
         }
     }
 
+    private static void doOnLeftClick(){
+        if(songs.size() == 0)return;
+        oldStop = Duration.valueOf("0.0ms");
+        if(false){ //Random?
+            if(isPlaying){
+                player.pause();
+                if(player.getCurrentTime().toSeconds() < 6){
+                    playSong(player.getVolume(), isMuted, songBefore);
+                }
+                else{
+                    playSong(player.getVolume(), isMuted, song.getSource());
+                }
+            }
+            else{
+                playSong(player.getVolume(), isMuted, songBefore, true);
+            }
+        }
+        else {
+            if(isPlaying){
+                player.pause();
+                if(player.getCurrentTime().toSeconds() < 6){
+                    int index = songs.indexOf(song.getSource()) - 1;
+                    if(index < 0)index = songs.size() - 1;
+                    playSong(player.getVolume(), isMuted, songs.get(index));
+                }
+                else{
+                    playSong(player.getVolume(), isMuted, song.getSource());
+                }
+            }
+            else{
+                int index = songs.indexOf(song.getSource()) - 1;
+                if(index < 0)index = songs.size() - 1;
+                playSong(player.getVolume(), isMuted, songs.get(index), true);
+            }
+        }
+    }
+
+    private static void doOnRightClick(){
+        if(songs.size() == 0)return;
+        String src = player.getMedia().getSource();
+        player.stop();
+        double volume = player.getVolume();
+        boolean isMute = player.isMute();
+        oldStop = Duration.valueOf("0.0ms");
+        if(isPlaying){
+            playSong(volume, isMute, checkForNextSong(src));
+        }
+        else {
+            playSong(volume, isMute, checkForNextSong(src), true);
+        }
+    }
+
     private static void addControls(){
 
         ImageView middle = new ImageView();
@@ -416,7 +474,7 @@ public class Main extends Application {
             if(event.getCode() == KeyCode.SPACE && !scene.lookup("#searchField").isFocused()){
                 doOnMiddleClick(middle);
             }
-            else if(event.getCode() == KeyCode.M){
+            else if((event.getCode() == KeyCode.M && !scene.lookup("#searchField").isFocused()) ||event.getCode() == KeyCode.F8){
                 if(isMuted){
                     player.setMute(false);
                 }
@@ -426,64 +484,25 @@ public class Main extends Application {
                 isMuted = !isMuted;
                 ((ImageView)scene.lookup("#muteButton")).setImage(new Image(isMuted ? "de/jonas/schroeter/img/soundOff.png" : "de/jonas/schroeter/img/soundOn.png"));
             }
+            else if(event.getCode() == KeyCode.F5){
+                doOnLeftClick();
+            }
+            else if(event.getCode() == KeyCode.F7){
+                doOnRightClick();
+            }
         });
-        middle.setOnMouseClicked(event -> {
-            doOnMiddleClick(middle);
-        });
+        middle.setOnMouseClicked(event -> doOnMiddleClick(middle));
 
         ImageView left = new ImageView();
         left.setImage(new Image("de/jonas/schroeter/img/back.png"));
         left.setLayoutX(middle.getLayoutX() - left.getImage().getWidth() - 15);
         left.setLayoutY(middle.getLayoutY() + middle.getImage().getHeight() / 2 - left.getImage().getHeight() / 2);
-        left.setOnMouseClicked(event -> {
-            oldStop = Duration.valueOf("0.0ms");
-            if(false){ //Random?
-                if(isPlaying){
-                    player.pause();
-                    if(player.getCurrentTime().toSeconds() < 6){
-                        System.out.println(songBefore);
-                        playSong(player.getVolume(), isMuted, songBefore);
-                    }
-                    else{
-                        playSong(player.getVolume(), isMuted, song.getSource());
-                    }
-                }
-                else{
-                    playSong(player.getVolume(), isMuted, songBefore);
-                }
-            }
-            else {
-                if(isPlaying){
-                    player.pause();
-                    if(player.getCurrentTime().toSeconds() < 6){
-                        int index = songs.indexOf(song.getSource()) - 1;
-                        if(index < 0)index = songs.size() - 1;
-                        playSong(player.getVolume(), isMuted, songs.get(index));
-                    }
-                    else{
-                        playSong(player.getVolume(), isMuted, song.getSource());
-                    }
-                }
-                else{
-                    int index = songs.indexOf(song.getSource()) - 1;
-                    if(index < 0)index = songs.size() - 1;
-                    playSong(player.getVolume(), isMuted, songs.get(index));
-                }
-            }
-        });
+        left.setOnMouseClicked(event -> doOnLeftClick());
         ImageView right = new ImageView();
         right.setImage(new Image("de/jonas/schroeter/img/forwards.png"));
         right.setLayoutX(middle.getLayoutX() + middle.getImage().getWidth() + 15);
         right.setLayoutY(middle.getLayoutY() + middle.getImage().getHeight() / 2 - right.getImage().getHeight() / 2);
-        right.setOnMouseClicked(event -> {
-            String src = player.getMedia().getSource();
-            player.stop();
-            double volume = player.getVolume();
-            boolean isMute = player.isMute();
-            oldStop = Duration.valueOf("0.0ms");
-            playSong(volume, isMute, checkForNextSong(src));
-            //TODO fix bug: when stopped and this button is being pressed, it should not play the next one
-        });
+        right.setOnMouseClicked(event -> doOnRightClick());
         ImageView muteButton = new ImageView();
         muteButton.setId("muteButton");
         muteButton.setImage(new Image(isMuted ? "de/jonas/schroeter/img/soundOff.png" : "de/jonas/schroeter/img/soundOn.png"));
@@ -580,6 +599,7 @@ public class Main extends Application {
         underBar.setLayoutY(scene.lookup("#bar").getLayoutY() - 10);
 
         TextField searchField = new TextField();
+        searchField.setStyle("-fx-faint-focus-color: transparent; -fx-focus-color: grey");
         searchField.setId("searchField");
         ListView<String> view = (ListView<String>)scene.lookup("#songView");
         searchField.setPrefWidth(200);
@@ -594,11 +614,12 @@ public class Main extends Application {
             }
             for(String s : view.getItems()){
                 if(s.contains(searchField.getText())){
-                    System.out.println(searchField.getText());
-                    System.out.println(s);
                     view.getSelectionModel().select(s);
                     view.scrollTo(s);
                     break;
+                }
+                else {
+                    view.getSelectionModel().clearSelection();
                 }
             }
         });
@@ -627,7 +648,6 @@ public class Main extends Application {
         bar.setLayoutY(scene.getHeight() - 100);
         bar.setId("bar");
         bar.setStyle("-fx-faint-focus-color: transparent; -fx-focus-color: grey");
-        root.getChildren().add(bar);
         // SP * (FT / 100) = CT
         bar.setOnDragDetected(event -> barDragged = true);
 
@@ -640,7 +660,16 @@ public class Main extends Application {
             }
             barDragged = false;
         });
+        ProgressBar progressBar = new ProgressBar();
+        progressBar.setPrefWidth(bar.getPrefWidth());
+        progressBar.setLayoutX(bar.getLayoutX());
+        progressBar.setLayoutY(bar.getLayoutY());
+        progressBar.setPrefHeight(10);
+        progressBar.setProgress(80);
+        progressBar.setId("progressBar");
+        progressBar.setStyle("-fx-border-color: black; -fx-fill: red;");
 
+        root.getChildren().addAll(bar);
     }
 
     private static void refreshListView(){
@@ -695,7 +724,7 @@ public class Main extends Application {
             }
             else if(event.getButton().equals(MouseButton.PRIMARY) && event.getClickCount() == 1){
                 if(song == null)view.getSelectionModel().clearSelection();
-                else selectItem();
+                else view.getSelectionModel().select(srcToName.get(song.getSource()));
             }
         });
         root.getChildren().add(view);
@@ -704,6 +733,7 @@ public class Main extends Application {
     private static void addMenu(Stage primaryStage){
         MenuBar menuBar = new MenuBar();
         menuBar.setStyle("-fx-border-color: black");
+
         Menu files = new Menu("Files");
         MenuItem search = new MenuItem("Add Search Directory");
         search.setOnAction(event -> {
@@ -714,7 +744,6 @@ public class Main extends Application {
             String s = String.valueOf(dialog.showAndWait());
             s = s.replace("Optional[", "").replace("]", "").replace("\\", "/");
             if(s.equals("Optional.empty"))return;
-            System.out.println(s.equals(""));
             if(!s.equals("") && Files.exists(Paths.get(s))) searchDirectories.add(s);
                 else {
                     createDirNotExist(s);
@@ -732,7 +761,6 @@ public class Main extends Application {
             String s = String.valueOf(dialog.showAndWait());
             s = s.replace("Optional[", "").replace("]", "").replace("\\", "/");
             if(s.equals("Optional.empty"))return;
-            System.out.println(s.equals(""));
             if(!s.equals("") && Files.exists(Paths.get(s))){
                 System.out.println("Remove!");
                 /*File dir = new File(s);
@@ -746,9 +774,40 @@ public class Main extends Application {
             }
             fillList(true);
         });
-
         files.getItems().addAll(search, file);
-        menuBar.getMenus().add(files);
+
+        Menu options = new Menu("Options");
+        MenuItem speedMult = new Menu("Speed");
+        speedMult.setOnAction(event -> {
+            TextInputDialog dialog = new TextInputDialog();
+            dialog.setTitle("Speed");
+            dialog.setHeaderText("The playing multiplier is currently " + player.getRate());
+            try{
+                String s = String.valueOf(dialog.showAndWait()).replace("Optional[", "").replace("]", "");
+                System.out.println(s);
+                double rate = Double.parseDouble(s);
+                if(rate < 0 || rate > 8){
+                    player.setRate(rate < 0 ? 0 : 8);
+                    Alert alert = new Alert(Alert.AlertType.WARNING);
+                    alert.setTitle("Warning");
+                    alert.setHeaderText("The chosen value has to be between 0.0 and 8.0.");
+                    alert.show();
+                    return;
+                }
+                player.setRate(rate);
+                Main.rate = rate;
+            }
+            catch(NumberFormatException e){
+                Alert alert = new Alert(Alert.AlertType.WARNING);
+                alert.setTitle("Warning");
+                alert.setHeaderText("Please input numbers only.");
+                alert.show();
+                System.out.println("Illegal Argument!");
+            }
+        });
+        options.getItems().add(speedMult);
+
+        menuBar.getMenus().addAll(files, options);
         root.getChildren().add(menuBar);
     }
 
@@ -766,7 +825,6 @@ public class Main extends Application {
     }
 
     private static void createDirNotExist(String s){
-        System.out.println("Error");
         Alert alert = new Alert(Alert.AlertType.WARNING);
         alert.setTitle("Warning");
         alert.setHeaderText("The directory \"" + s + "\" does not exist.");
