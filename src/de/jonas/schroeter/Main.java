@@ -35,6 +35,7 @@ import java.io.*;
 import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.time.LocalDateTime;
 import java.util.*;
 
 /**
@@ -80,6 +81,7 @@ public class Main extends Application {
         primaryStage.setResizable(false);
         if(song == null){
             findMp3(primaryStage);
+            createReadme();
         }
         else{
             fillList(false);
@@ -93,6 +95,7 @@ public class Main extends Application {
         primaryStage.setOnCloseRequest(event -> {
             saveTracks();
             saveConfig();
+            System.out.println(excludedSongs);
         });
 
     }
@@ -182,7 +185,10 @@ public class Main extends Application {
 
     private static void saveTracks(){
         Gson gson = new Gson();
-        String json = gson.toJson(songs);
+        ArrayList[] arrayLists = new ArrayList[2];
+        arrayLists[0] = songs;
+        arrayLists[1] = excludedSongs;
+        String json = gson.toJson(arrayLists);
         File file = new File("songs.json");
         BufferedWriter writer;
         try{
@@ -198,16 +204,23 @@ public class Main extends Application {
     private static void fillList(boolean isRefresh){
         srcToName.clear();
         nameToSrc.clear();
-        try{
-            Scanner scanner = new Scanner(new File("songs.json"));
-            TypeToken<ArrayList<String>> typeToken = new TypeToken<ArrayList<String>>() {};
-            //songs.addAll(gson.fromJson(scanner.nextLine(), typeToken.getType()));
-            for(String s : (ArrayList<String>)gson.fromJson(scanner.nextLine(), typeToken.getType())){
-                if(!songs.contains(s) && !excludedSongs.contains(s))songs.add(s);
+        if(!isRefresh){
+            try{
+                Scanner scanner = new Scanner(new File("songs.json"));
+                TypeToken<ArrayList[]> typeToken = new TypeToken<ArrayList[]>() {
+                };
+                //songs.addAll(gson.fromJson(scanner.nextLine(), typeToken.getType()));
+                ArrayList[] songLists = gson.fromJson(scanner.nextLine(), typeToken.getType());
+                excludedSongs = songLists[1];
+                for(String s : (ArrayList<String>) songLists[0]){
+                    if(!songs.contains(s) && !excludedSongs.contains(s)){
+                        songs.add(s);
+                    }
+                }
             }
-        }
-        catch(IOException e){
-            System.out.println("JSON is going to be created.");
+            catch(IOException e){
+                System.out.println("JSON is going to be created.");
+            }
         }
         try{
             Scanner scanner = new Scanner(new File("config.json"));
@@ -698,6 +711,7 @@ public class Main extends Application {
             MenuItem delete = new MenuItem("Delete");
             delete.setOnAction(event -> {
                 songs.remove(nameToSrc.get(cell.getItem()));
+                System.out.println(nameToSrc.get(cell.getItem()));
                 excludedSongs.add(nameToSrc.get(cell.getItem()));
                 fillList(true);
             });
@@ -829,5 +843,25 @@ public class Main extends Application {
         alert.setTitle("Warning");
         alert.setHeaderText("The directory \"" + s + "\" does not exist.");
         alert.show();
+    }
+
+    private static void createReadme(){
+        File file = new File("readme.txt");
+        try{
+            BufferedWriter writer = new BufferedWriter(new FileWriter(file));
+            writer.write("First run in this directory: " + LocalDateTime.now().toLocalDate().toString());
+            writer.newLine();
+            writer.write("Developer: Jonas Schröter");
+            writer.newLine();
+            writer.write("https://lazybone2017.github.io/");
+            writer.newLine();
+            writer.newLine();
+            writer.write("For the first time, a MP3 file is needed in the jar\'s directory.");
+            writer.close();
+        }
+        catch(IOException e){
+            e.printStackTrace();
+        }
+
     }
 }
